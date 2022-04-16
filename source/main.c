@@ -17,6 +17,16 @@
 #include <wayland-cursor.h>
 #include <xkbcommon/xkbcommon.h>
 
+const uint32_t BORDER_WIDTH = 10;
+
+enum cursor_decor_position
+{
+    CURSOR_DECOR_POSITION_TOP_BORDER = 1u << 0,
+    CURSOR_DECOR_POSITION_BOTTOM_BORDER = 1u << 1,
+    CURSOR_DECOR_POSITION_LEFT_BORDER = 1u << 2,
+    CURSOR_DECOR_POSITION_RIGHT_BORDER = 1u << 3,
+};
+
 struct wayland_client
 {
     // Global
@@ -26,6 +36,7 @@ struct wayland_client
     struct wl_compositor *compositor;
     struct xdg_wm_base *xdg_wm_base;
     struct wl_seat *seat;
+    struct wl_subcompositor *subcompositor;
     // Objects
     struct wl_surface *surface;
     struct xdg_surface *xdg_surface;
@@ -36,26 +47,38 @@ struct wayland_client
     struct wl_keyboard *keyboard;
     struct xkb_context *xkb_context;
     struct xkb_state *xkb_state;
+    // Only decor
+    struct
+    {
+        struct wl_surface *border_top_surface;
+        struct wl_subsurface *border_top_subsurface;
+        struct wl_surface *border_bottom_surface;
+        struct wl_subsurface *border_bottom_subsurface;
+        struct wl_surface *border_left_surface;
+        struct wl_subsurface *border_left_subsurface;
+        struct wl_surface *border_right_surface;
+        struct wl_subsurface *border_right_subsurface;
+    } decor;
+
     // Stored values
     int32_t width;
     int32_t height;
     wl_fixed_t pointer_x_position;
     wl_fixed_t pointer_y_position;
     bool should_close;
+    enum cursor_decor_position cursor_decor_position;
 };
 
 // ####################################################################################################################
 // Helpers
 
-static void client_load_cursor(struct wayland_client *client, char *cursor_name)
+static struct wl_buffer *client_load_cursor(struct wayland_client *client, char *cursor_name)
 {
     struct wl_cursor_theme *cursor_theme = wl_cursor_theme_load(NULL, 24, client->shm);
     struct wl_cursor *cursor = wl_cursor_theme_get_cursor(cursor_theme, cursor_name);
     client->cursor_image = cursor->images[0];
     struct wl_buffer *cursor_buffer = wl_cursor_image_get_buffer(client->cursor_image);
-    client->cursor_surface = wl_compositor_create_surface(client->compositor);
-    wl_surface_attach(client->cursor_surface, cursor_buffer, 0, 0);
-    wl_surface_commit(client->cursor_surface);
+    return cursor_buffer;
 }
 
 // ####################################################################################################################
@@ -70,10 +93,8 @@ static const struct wl_buffer_listener buffer_listener = {
     .release = wl_buffer_release,
 };
 
-static struct wl_buffer *buffer_draw(struct wayland_client *client)
+static struct wl_buffer *buffer_draw(struct wl_shm *shm, int32_t width, int32_t height, uint32_t color)
 {
-    int32_t width = client->width;
-    int32_t height = client->height;
     int32_t stride = width * 4;
     int32_t size = stride * height;
 
@@ -92,8 +113,8 @@ static struct wl_buffer *buffer_draw(struct wayland_client *client)
         return NULL;
     }
 
-    struct wl_shm_pool *pool = wl_shm_create_pool(client->shm, fd, size);
-    struct wl_buffer *buffer = wl_shm_pool_create_buffer(pool, 0, width, height, stride, WL_SHM_FORMAT_XRGB8888);
+    struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, size);
+    struct wl_buffer *buffer = wl_shm_pool_create_buffer(pool, 0, width, height, stride, WL_SHM_FORMAT_ARGB8888);
     wl_shm_pool_destroy(pool);
     close(fd);
 
@@ -101,7 +122,7 @@ static struct wl_buffer *buffer_draw(struct wayland_client *client)
     {
         for (int x = 0; x < width; ++x)
         {
-            data[y * width + x] = 0xff241f31;
+            data[y * width + x] = color;
         }
     }
 
@@ -151,8 +172,31 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, u
     struct wayland_client *client = data;
     xdg_surface_ack_configure(xdg_surface, serial);
 
-    struct wl_buffer *buffer = buffer_draw(client);
+    struct wl_buffer *buffer = buffer_draw(client->shm, client->width - 2 * BORDER_WIDTH, client->height - 2 * BORDER_WIDTH, 0xff444444);
     wl_surface_attach(client->surface, buffer, 0, 0);
+
+    // DECOR
+
+    struct wl_buffer *decor_buffer_top_bottom = buffer_draw(client->shm, client->width - 2 * BORDER_WIDTH, BORDER_WIDTH, 0xffaaaaaa);
+
+    wl_surface_attach(client->decor.border_top_surface, decor_buffer_top_bottom, 0, 0);
+    wl_subsurface_set_position(client->decor.border_top_subsurface, 0, -BORDER_WIDTH);
+    wl_surface_commit(client->decor.border_top_surface);
+
+    wl_surface_attach(client->decor.border_bottom_surface, decor_buffer_top_bottom, 0, 0);
+    wl_subsurface_set_position(client->decor.border_bottom_subsurface, 0, client->height - 2 *BORDER_WIDTH);
+    wl_surface_commit(client->decor.border_bottom_surface);
+
+    struct wl_buffer *decor_buffer_left_right = buffer_draw(client->shm, BORDER_WIDTH, client->height - 2 * BORDER_WIDTH, 0xffaaaaaa);
+
+    wl_surface_attach(client->decor.border_left_surface, decor_buffer_left_right, 0, 0);
+    wl_subsurface_set_position(client->decor.border_left_subsurface, -BORDER_WIDTH, 0);
+    wl_surface_commit(client->decor.border_left_surface);
+
+    wl_surface_attach(client->decor.border_right_surface, decor_buffer_left_right, 0, 0);
+    wl_subsurface_set_position(client->decor.border_right_subsurface, client->width - 2 * BORDER_WIDTH, 0);
+    wl_surface_commit(client->decor.border_right_surface);
+
     wl_surface_commit(client->surface);
 }
 
@@ -233,14 +277,65 @@ static struct wl_keyboard_listener keyboard_listener = {
 // ####################################################################################################################
 // Pointer
 
+static void set_cursor(struct wayland_client *client, uint32_t serial, char *name)
+{
+    struct wl_buffer *cursor_buffer = client_load_cursor(client, name);
+    client->cursor_surface = wl_compositor_create_surface(client->compositor);
+    wl_surface_attach(client->cursor_surface, cursor_buffer, 0, 0);
+    wl_surface_commit(client->cursor_surface);
+    wl_pointer_set_cursor(client->pointer, serial, client->cursor_surface, client->cursor_image->hotspot_x, client->cursor_image->hotspot_y);
+}
+
 static void pointer_enter(void *data, struct wl_pointer *pointer, uint32_t serial, struct wl_surface *surface, wl_fixed_t x_position, wl_fixed_t y_position)
 {
     struct wayland_client *client = data;
-    wl_pointer_set_cursor(client->pointer, serial, client->cursor_surface, client->cursor_image->hotspot_x, client->cursor_image->hotspot_y);
+
+    if (surface == client->decor.border_top_surface)
+    {
+        client->cursor_decor_position |= CURSOR_DECOR_POSITION_TOP_BORDER;
+        set_cursor(client, serial, "n-resize");
+    }
+    else if (surface == client->decor.border_bottom_surface)
+    {
+        client->cursor_decor_position |= CURSOR_DECOR_POSITION_BOTTOM_BORDER;
+        set_cursor(client, serial, "s-resize");
+    }
+    else if (surface == client->decor.border_left_surface)
+    {
+        client->cursor_decor_position |= CURSOR_DECOR_POSITION_LEFT_BORDER;
+        set_cursor(client, serial, "w-resize");
+    }
+    else if (surface == client->decor.border_right_surface)
+    {
+        client->cursor_decor_position |= CURSOR_DECOR_POSITION_RIGHT_BORDER;
+        set_cursor(client, serial, "e-resize");
+    }
+    else
+    {
+        set_cursor(client, serial, "left_ptr");
+    }
 }
 
 static void pointer_leave(void *data, struct wl_pointer *pointer, uint32_t serial, struct wl_surface *surface)
 {
+    struct wayland_client *client = data;
+
+    if (surface == client->decor.border_top_surface)
+    {
+        client->cursor_decor_position &= ~CURSOR_DECOR_POSITION_TOP_BORDER;
+    }
+    else if (surface == client->decor.border_bottom_surface)
+    {
+        client->cursor_decor_position &= ~CURSOR_DECOR_POSITION_BOTTOM_BORDER;
+    }
+    else if (surface == client->decor.border_left_surface)
+    {
+        client->cursor_decor_position &= ~CURSOR_DECOR_POSITION_LEFT_BORDER;
+    }
+    else if (surface == client->decor.border_right_surface)
+    {
+        client->cursor_decor_position &= ~CURSOR_DECOR_POSITION_RIGHT_BORDER;
+    }
 }
 
 static void pointer_motion(void *data, struct wl_pointer *pointer, uint32_t time, wl_fixed_t x_position, wl_fixed_t y_position)
@@ -254,56 +349,23 @@ static void pointer_button(void *data, struct wl_pointer *pointer, uint32_t seri
 {
     struct wayland_client *client = data;
 
-    if (state == WL_POINTER_BUTTON_STATE_PRESSED)
+    if (client->cursor_decor_position & CURSOR_DECOR_POSITION_TOP_BORDER)
     {
-        // Handle move and resize.
-
-        const uint32_t drag_border_width = 20;
-
-        const int32_t pointer_x_position = wl_fixed_to_int(client->pointer_x_position);
-        const int32_t pointer_y_position = wl_fixed_to_int(client->pointer_y_position);
-
-        const bool pointer_is_left = pointer_x_position < drag_border_width;
-        const bool pointer_is_top = pointer_y_position < drag_border_width;
-        const bool pointer_is_right = client->width - pointer_x_position < drag_border_width;
-        const bool pointer_is_bottom = client->height - pointer_y_position < drag_border_width;
-
-        if (pointer_is_left && pointer_is_top)
-        {
-            xdg_toplevel_resize(client->xdg_toplevel, client->seat, serial, XDG_TOPLEVEL_RESIZE_EDGE_TOP_LEFT);
-        }
-        else if (pointer_is_right && pointer_is_top)
-        {
-            xdg_toplevel_resize(client->xdg_toplevel, client->seat, serial, XDG_TOPLEVEL_RESIZE_EDGE_TOP_RIGHT);
-        }
-        else if (pointer_is_left && pointer_is_bottom)
-        {
-            xdg_toplevel_resize(client->xdg_toplevel, client->seat, serial, XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_LEFT);
-        }
-        else if (pointer_is_right && pointer_is_bottom)
-        {
-            xdg_toplevel_resize(client->xdg_toplevel, client->seat, serial, XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT);
-        }
-        else if (pointer_is_left)
-        {
-            xdg_toplevel_resize(client->xdg_toplevel, client->seat, serial, XDG_TOPLEVEL_RESIZE_EDGE_LEFT);
-        }
-        else if (pointer_is_top)
-        {
-            xdg_toplevel_resize(client->xdg_toplevel, client->seat, serial, XDG_TOPLEVEL_RESIZE_EDGE_TOP);
-        }
-        else if (pointer_is_right)
-        {
-            xdg_toplevel_resize(client->xdg_toplevel, client->seat, serial, XDG_TOPLEVEL_RESIZE_EDGE_RIGHT);
-        }
-        else if (pointer_is_bottom)
-        {
-            xdg_toplevel_resize(client->xdg_toplevel, client->seat, serial, XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM);
-        }
-        else
-        {
-            xdg_toplevel_move(client->xdg_toplevel, client->seat, serial);
-        }
+        xdg_toplevel_resize(client->xdg_toplevel, client->seat, serial, XDG_TOPLEVEL_RESIZE_EDGE_TOP);
+    }
+    else if (client->cursor_decor_position & CURSOR_DECOR_POSITION_BOTTOM_BORDER)
+    {
+        xdg_toplevel_resize(client->xdg_toplevel, client->seat, serial, XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM);
+    }
+    else if (client->cursor_decor_position & CURSOR_DECOR_POSITION_LEFT_BORDER)
+    {
+        xdg_toplevel_resize(client->xdg_toplevel, client->seat, serial, XDG_TOPLEVEL_RESIZE_EDGE_LEFT);
+    }
+    else if (client->cursor_decor_position & CURSOR_DECOR_POSITION_RIGHT_BORDER)
+    {
+        xdg_toplevel_resize(client->xdg_toplevel, client->seat, serial, XDG_TOPLEVEL_RESIZE_EDGE_RIGHT);
+    } else {
+        xdg_toplevel_move(client->xdg_toplevel, client->seat, serial);
     }
 }
 
@@ -386,7 +448,7 @@ static const struct wl_seat_listener seat_listener = {
 static void registry_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version)
 {
     struct wayland_client *client = data;
-    //printf("info (wayland): Registred interface `%s-%d`.\n", interface, version);
+    printf("info (wayland): Registred interface `%s-%d`.\n", interface, version);
 
     if (strcmp(interface, wl_shm_interface.name) == 0)
     {
@@ -405,6 +467,10 @@ static void registry_global(void *data, struct wl_registry *registry, uint32_t n
     {
         client->seat = wl_registry_bind(registry, name, &wl_seat_interface, 5);
         wl_seat_add_listener(client->seat, &seat_listener, client);
+    }
+    else if (strcmp(interface, wl_subcompositor_interface.name) == 0)
+    {
+        client->subcompositor = wl_registry_bind(registry, name, &wl_subcompositor_interface, 1);
     }
 }
 
@@ -438,7 +504,21 @@ int main()
     xdg_toplevel_set_min_size(client.xdg_toplevel, 300, 300);
     wl_surface_commit(client.surface);
 
-    client_load_cursor(&client, "left_ptr");
+    client.decor.border_top_surface = wl_compositor_create_surface(client.compositor);
+    client.decor.border_top_subsurface = wl_subcompositor_get_subsurface(client.subcompositor, client.decor.border_top_surface, client.surface);
+
+    client.decor.border_bottom_surface = wl_compositor_create_surface(client.compositor);
+    client.decor.border_bottom_subsurface = wl_subcompositor_get_subsurface(client.subcompositor, client.decor.border_bottom_surface, client.surface);
+
+    client.decor.border_left_surface = wl_compositor_create_surface(client.compositor);
+    client.decor.border_left_subsurface = wl_subcompositor_get_subsurface(client.subcompositor, client.decor.border_left_surface, client.surface);
+
+
+    client.decor.border_right_surface = wl_compositor_create_surface(client.compositor);
+    client.decor.border_right_subsurface = wl_subcompositor_get_subsurface(client.subcompositor, client.decor.border_right_surface, client.surface);
+    //wl_subsurface_set_position(client.decor.border_right_subsurface, client->, 0);
+
+    wl_subsurface_place_above(client.decor.border_top_subsurface, client.decor.border_left_surface);
 
     printf("Use the Escape key to close the window.\n");
 
