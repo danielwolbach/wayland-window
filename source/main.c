@@ -17,8 +17,8 @@
 #include <wayland-cursor.h>
 #include <xkbcommon/xkbcommon.h>
 
-uint32_t BORDER_WIDTH = 5;
-uint32_t TITLEBAR_WIDTH = 30;
+const uint32_t BORDER_WIDTH = 5;
+const uint32_t TITLEBAR_WIDTH = 30;
 
 enum cursor_decor_position
 {
@@ -32,6 +32,21 @@ enum cursor_decor_position
     CURSOR_DECOR_POSITION_BOTTOM_RIGHT_CORNER = 1u << 7,
     CURSOR_DECOR_POSITION_TITLEBAR = 1u << 8,
     CURSOR_DECOR_POSITION_CLOSE_BUTTON = 1u << 9,
+};
+
+enum cursor_variant
+{
+    CURSOR_VARIANT_LEFT_PTR,
+    CURSOR_VARIANT_POINTER,
+    CURSOR_VARIANT_N_RESIZE,
+    CURSOR_VARIANT_S_RESIZE,
+    CURSOR_VARIANT_W_RESIZE,
+    CURSOR_VARIANT_E_RESIZE,
+    CURSOR_VARIANT_NW_RESIZE,
+    CURSOR_VARIANT_NE_RESIZE,
+    CURSOR_VARIANT_SW_RESIZE,
+    CURSOR_VARIANT_SE_RESIZE,
+    CURSOR_VARIANT_COUNT,
 };
 
 struct wayland_client
@@ -50,7 +65,8 @@ struct wayland_client
     struct xdg_toplevel *xdg_toplevel;
     struct wl_pointer *pointer;
     struct wl_surface *cursor_surface;
-    struct wl_cursor_image *cursor_image;
+    struct wl_cursor_image *cursor_images[CURSOR_VARIANT_COUNT];
+    struct wl_buffer *cursor_buffers[CURSOR_VARIANT_COUNT];
     struct wl_keyboard *keyboard;
     struct xkb_context *xkb_context;
     struct xkb_state *xkb_state;
@@ -79,6 +95,8 @@ struct wayland_client
         struct wl_subsurface *corner_bottom_right_subsurface;
     } decor;
 
+
+
     // Stored values
     int32_t width;
     int32_t height;
@@ -90,15 +108,6 @@ struct wayland_client
 
 // ####################################################################################################################
 // Helpers
-
-static struct wl_buffer *client_load_cursor(struct wayland_client *client, char *cursor_name)
-{
-    struct wl_cursor_theme *cursor_theme = wl_cursor_theme_load(NULL, 24, client->shm);
-    struct wl_cursor *cursor = wl_cursor_theme_get_cursor(cursor_theme, cursor_name);
-    client->cursor_image = cursor->images[0];
-    struct wl_buffer *cursor_buffer = wl_cursor_image_get_buffer(client->cursor_image);
-    return cursor_buffer;
-}
 
 // ####################################################################################################################
 // Buffer
@@ -338,13 +347,11 @@ static struct wl_keyboard_listener keyboard_listener = {
 // ####################################################################################################################
 // Pointer
 
-static void set_cursor(struct wayland_client *client, uint32_t serial, char *name)
+static void set_cursor(struct wayland_client *client, uint32_t serial, enum cursor_variant cursor_variant)
 {
-    struct wl_buffer *cursor_buffer = client_load_cursor(client, name);
-    client->cursor_surface = wl_compositor_create_surface(client->compositor);
-    wl_surface_attach(client->cursor_surface, cursor_buffer, 0, 0);
+    wl_surface_attach(client->cursor_surface, client->cursor_buffers[cursor_variant], 0, 0);
     wl_surface_commit(client->cursor_surface);
-    wl_pointer_set_cursor(client->pointer, serial, client->cursor_surface, client->cursor_image->hotspot_x, client->cursor_image->hotspot_y);
+    wl_pointer_set_cursor(client->pointer, serial, client->cursor_surface, client->cursor_images[cursor_variant]->hotspot_x, client->cursor_images[cursor_variant]->hotspot_y);
 }
 
 static void pointer_enter(void *data, struct wl_pointer *pointer, uint32_t serial, struct wl_surface *surface, wl_fixed_t x_position, wl_fixed_t y_position)
@@ -354,56 +361,56 @@ static void pointer_enter(void *data, struct wl_pointer *pointer, uint32_t seria
     if (surface == client->decor.titlebar_surface)
     {
         client->cursor_decor_position |= CURSOR_DECOR_POSITION_TITLEBAR;
-        set_cursor(client, serial, "left_ptr");
+        set_cursor(client, serial, CURSOR_VARIANT_LEFT_PTR);
     }
     else if (surface == client->decor.close_button_surface)
     {
         client->cursor_decor_position |= CURSOR_DECOR_POSITION_CLOSE_BUTTON;
-        set_cursor(client, serial, "pointer");
+        set_cursor(client, serial, CURSOR_VARIANT_POINTER);
     }
     else if (surface == client->decor.corner_top_left_surface)
     {
         client->cursor_decor_position |= CURSOR_DECOR_POSITION_TOP_LEFT_CORNER;
-        set_cursor(client, serial, "nw-resize");
+        set_cursor(client, serial, CURSOR_VARIANT_NW_RESIZE);
     }
     else if (surface == client->decor.corner_top_right_surface)
     {
         client->cursor_decor_position |= CURSOR_DECOR_POSITION_TOP_RIGHT_CORNER;
-        set_cursor(client, serial, "ne-resize");
+        set_cursor(client, serial, CURSOR_VARIANT_NE_RESIZE);
     }
     else if (surface == client->decor.corner_bottom_left_surface)
     {
         client->cursor_decor_position |= CURSOR_DECOR_POSITION_BOTTOM_LEFT_CORNER;
-        set_cursor(client, serial, "sw-resize");
+        set_cursor(client, serial, CURSOR_VARIANT_SW_RESIZE);
     }
     else if (surface == client->decor.corner_bottom_right_surface)
     {
         client->cursor_decor_position |= CURSOR_DECOR_POSITION_BOTTOM_RIGHT_CORNER;
-        set_cursor(client, serial, "se-resize");
+        set_cursor(client, serial, CURSOR_VARIANT_SE_RESIZE);
     }
     else if (surface == client->decor.border_top_surface)
     {
         client->cursor_decor_position |= CURSOR_DECOR_POSITION_TOP_BORDER;
-        set_cursor(client, serial, "n-resize");
+        set_cursor(client, serial, CURSOR_VARIANT_N_RESIZE);
     }
     else if (surface == client->decor.border_bottom_surface)
     {
         client->cursor_decor_position |= CURSOR_DECOR_POSITION_BOTTOM_BORDER;
-        set_cursor(client, serial, "s-resize");
+        set_cursor(client, serial, CURSOR_VARIANT_S_RESIZE);
     }
     else if (surface == client->decor.border_left_surface)
     {
         client->cursor_decor_position |= CURSOR_DECOR_POSITION_LEFT_BORDER;
-        set_cursor(client, serial, "w-resize");
+        set_cursor(client, serial, CURSOR_VARIANT_W_RESIZE);
     }
     else if (surface == client->decor.border_right_surface)
     {
         client->cursor_decor_position |= CURSOR_DECOR_POSITION_RIGHT_BORDER;
-        set_cursor(client, serial, "e-resize");
+        set_cursor(client, serial, CURSOR_VARIANT_E_RESIZE);
     }
     else
     {
-        set_cursor(client, serial, "left_ptr");
+        set_cursor(client, serial, CURSOR_VARIANT_LEFT_PTR);
     }
 }
 
@@ -662,9 +669,54 @@ int main()
     client.decor.corner_bottom_right_surface = wl_compositor_create_surface(client.compositor);
     client.decor.corner_bottom_right_subsurface = wl_subcompositor_get_subsurface(client.subcompositor, client.decor.corner_bottom_right_surface, client.surface);
 
+    struct wl_cursor_theme *cursor_theme = wl_cursor_theme_load(NULL, 24, client.shm);
+
+    struct wl_cursor *cursor = wl_cursor_theme_get_cursor(cursor_theme, "left_ptr");
+    client.cursor_images[CURSOR_VARIANT_LEFT_PTR] = cursor->images[0];
+    client.cursor_buffers[CURSOR_VARIANT_LEFT_PTR] = wl_cursor_image_get_buffer(client.cursor_images[CURSOR_VARIANT_LEFT_PTR]);
+
+    cursor = wl_cursor_theme_get_cursor(cursor_theme, "pointer");
+    client.cursor_images[CURSOR_VARIANT_POINTER] = cursor->images[0];
+    client.cursor_buffers[CURSOR_VARIANT_POINTER] = wl_cursor_image_get_buffer(client.cursor_images[CURSOR_VARIANT_POINTER]);
+
+    cursor = wl_cursor_theme_get_cursor(cursor_theme, "n-resize");
+    client.cursor_images[CURSOR_VARIANT_N_RESIZE] = cursor->images[0];
+    client.cursor_buffers[CURSOR_VARIANT_N_RESIZE] = wl_cursor_image_get_buffer(client.cursor_images[CURSOR_VARIANT_N_RESIZE]);
+
+    cursor = wl_cursor_theme_get_cursor(cursor_theme, "s-resize");
+    client.cursor_images[CURSOR_VARIANT_S_RESIZE] = cursor->images[0];
+    client.cursor_buffers[CURSOR_VARIANT_S_RESIZE] = wl_cursor_image_get_buffer(client.cursor_images[CURSOR_VARIANT_S_RESIZE]);
+
+    cursor = wl_cursor_theme_get_cursor(cursor_theme, "w-resize");
+    client.cursor_images[CURSOR_VARIANT_W_RESIZE] = cursor->images[0];
+    client.cursor_buffers[CURSOR_VARIANT_W_RESIZE] = wl_cursor_image_get_buffer(client.cursor_images[CURSOR_VARIANT_W_RESIZE]);
+
+    cursor = wl_cursor_theme_get_cursor(cursor_theme, "e-resize");
+    client.cursor_images[CURSOR_VARIANT_E_RESIZE] = cursor->images[0];
+    client.cursor_buffers[CURSOR_VARIANT_E_RESIZE] = wl_cursor_image_get_buffer(client.cursor_images[CURSOR_VARIANT_E_RESIZE]);
+
+    cursor = wl_cursor_theme_get_cursor(cursor_theme, "nw-resize");
+    client.cursor_images[CURSOR_VARIANT_NW_RESIZE] = cursor->images[0];
+    client.cursor_buffers[CURSOR_VARIANT_NW_RESIZE] = wl_cursor_image_get_buffer(client.cursor_images[CURSOR_VARIANT_NW_RESIZE]);
+
+    cursor = wl_cursor_theme_get_cursor(cursor_theme, "ne-resize");
+    client.cursor_images[CURSOR_VARIANT_NE_RESIZE] = cursor->images[0];
+    client.cursor_buffers[CURSOR_VARIANT_NE_RESIZE] = wl_cursor_image_get_buffer(client.cursor_images[CURSOR_VARIANT_NE_RESIZE]);
+
+    cursor = wl_cursor_theme_get_cursor(cursor_theme, "sw-resize");
+    client.cursor_images[CURSOR_VARIANT_SW_RESIZE] = cursor->images[0];
+    client.cursor_buffers[CURSOR_VARIANT_SW_RESIZE] = wl_cursor_image_get_buffer(client.cursor_images[CURSOR_VARIANT_SW_RESIZE]);
+
+    cursor = wl_cursor_theme_get_cursor(cursor_theme, "se-resize");
+    client.cursor_images[CURSOR_VARIANT_SE_RESIZE] = cursor->images[0];
+    client.cursor_buffers[CURSOR_VARIANT_SE_RESIZE] = wl_cursor_image_get_buffer(client.cursor_images[CURSOR_VARIANT_SE_RESIZE]);
+
+    client.cursor_surface = wl_compositor_create_surface(client.compositor);
+
     printf("Use the Escape key to close the window.\n");
 
     while (wl_display_dispatch(client.display) != -1 && !client.should_close)
     {
+
     }
 }
