@@ -3,6 +3,14 @@
 Minimal window using the Wayland protocol with `libwayland` in C. This is simply
 a learning exercise.
 
+## Compile
+
+```sh
+meson build && meson compile -C build
+```
+
+Remember to install the Wayland development packages.
+
 ## Resources
 
 - [Wayland Protocol](https://wayland.freedesktop.org/docs/html/)
