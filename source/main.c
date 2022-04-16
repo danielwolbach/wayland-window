@@ -17,7 +17,7 @@
 #include <wayland-cursor.h>
 #include <xkbcommon/xkbcommon.h>
 
-const uint32_t BORDER_WIDTH = 10;
+uint32_t BORDER_WIDTH = 10;
 
 enum cursor_decor_position
 {
@@ -25,6 +25,10 @@ enum cursor_decor_position
     CURSOR_DECOR_POSITION_BOTTOM_BORDER = 1u << 1,
     CURSOR_DECOR_POSITION_LEFT_BORDER = 1u << 2,
     CURSOR_DECOR_POSITION_RIGHT_BORDER = 1u << 3,
+    CURSOR_DECOR_POSITION_TOP_LEFT_CORNER = 1u << 4,
+    CURSOR_DECOR_POSITION_TOP_RIGHT_CORNER = 1u << 5,
+    CURSOR_DECOR_POSITION_BOTTOM_LEFT_CORNER = 1u << 6,
+    CURSOR_DECOR_POSITION_BOTTOM_RIGHT_CORNER = 1u << 7,
 };
 
 struct wayland_client
@@ -58,6 +62,14 @@ struct wayland_client
         struct wl_subsurface *border_left_subsurface;
         struct wl_surface *border_right_surface;
         struct wl_subsurface *border_right_subsurface;
+        struct wl_surface *corner_top_left_surface;
+        struct wl_subsurface *corner_top_left_subsurface;
+        struct wl_surface *corner_top_right_surface;
+        struct wl_subsurface *corner_top_right_subsurface;
+        struct wl_surface *corner_bottom_left_surface;
+        struct wl_subsurface *corner_bottom_left_subsurface;
+        struct wl_surface *corner_bottom_right_surface;
+        struct wl_subsurface *corner_bottom_right_subsurface;
     } decor;
 
     // Stored values
@@ -172,22 +184,21 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, u
     struct wayland_client *client = data;
     xdg_surface_ack_configure(xdg_surface, serial);
 
-    struct wl_buffer *buffer = buffer_draw(client->shm, client->width - 2 * BORDER_WIDTH, client->height - 2 * BORDER_WIDTH, 0xff444444);
-    wl_surface_attach(client->surface, buffer, 0, 0);
+    // Edge decor
 
-    // DECOR
+    uint32_t decor_color = 0xffaaaaaa;
 
-    struct wl_buffer *decor_buffer_top_bottom = buffer_draw(client->shm, client->width - 2 * BORDER_WIDTH, BORDER_WIDTH, 0xffaaaaaa);
+    struct wl_buffer *decor_buffer_top_bottom = buffer_draw(client->shm, client->width - 2 * BORDER_WIDTH, BORDER_WIDTH, decor_color);
 
     wl_surface_attach(client->decor.border_top_surface, decor_buffer_top_bottom, 0, 0);
     wl_subsurface_set_position(client->decor.border_top_subsurface, 0, -BORDER_WIDTH);
     wl_surface_commit(client->decor.border_top_surface);
 
     wl_surface_attach(client->decor.border_bottom_surface, decor_buffer_top_bottom, 0, 0);
-    wl_subsurface_set_position(client->decor.border_bottom_subsurface, 0, client->height - 2 *BORDER_WIDTH);
+    wl_subsurface_set_position(client->decor.border_bottom_subsurface, 0, client->height - 2 * BORDER_WIDTH);
     wl_surface_commit(client->decor.border_bottom_surface);
 
-    struct wl_buffer *decor_buffer_left_right = buffer_draw(client->shm, BORDER_WIDTH, client->height - 2 * BORDER_WIDTH, 0xffaaaaaa);
+    struct wl_buffer *decor_buffer_left_right = buffer_draw(client->shm, BORDER_WIDTH, client->height - 2 * BORDER_WIDTH, decor_color);
 
     wl_surface_attach(client->decor.border_left_surface, decor_buffer_left_right, 0, 0);
     wl_subsurface_set_position(client->decor.border_left_subsurface, -BORDER_WIDTH, 0);
@@ -196,6 +207,31 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, u
     wl_surface_attach(client->decor.border_right_surface, decor_buffer_left_right, 0, 0);
     wl_subsurface_set_position(client->decor.border_right_subsurface, client->width - 2 * BORDER_WIDTH, 0);
     wl_surface_commit(client->decor.border_right_surface);
+
+    // Corner decor
+
+    struct wl_buffer *decor_cornor = buffer_draw(client->shm, BORDER_WIDTH, BORDER_WIDTH, decor_color);
+
+    wl_surface_attach(client->decor.corner_top_left_surface, decor_cornor, 0, 0);
+    wl_subsurface_set_position(client->decor.corner_top_left_subsurface, -BORDER_WIDTH, -BORDER_WIDTH);
+    wl_surface_commit(client->decor.corner_top_left_surface);
+
+    wl_surface_attach(client->decor.corner_top_right_surface, decor_cornor, 0, 0);
+    wl_subsurface_set_position(client->decor.corner_top_right_subsurface, client->width - 2 * BORDER_WIDTH, -BORDER_WIDTH);
+    wl_surface_commit(client->decor.corner_top_right_surface);
+
+    wl_surface_attach(client->decor.corner_bottom_left_surface, decor_cornor, 0, 0);
+    wl_subsurface_set_position(client->decor.corner_bottom_left_subsurface, -BORDER_WIDTH, client->height - 2 * BORDER_WIDTH);
+    wl_surface_commit(client->decor.corner_bottom_left_surface);
+
+    wl_surface_attach(client->decor.corner_bottom_right_surface, decor_cornor, 0, 0);
+    wl_subsurface_set_position(client->decor.corner_bottom_right_subsurface, client->width - 2 * BORDER_WIDTH, client->height - 2 * BORDER_WIDTH);
+    wl_surface_commit(client->decor.corner_bottom_right_surface);
+
+    // Fill window
+
+    struct wl_buffer *buffer = buffer_draw(client->shm, client->width - 2 * BORDER_WIDTH, client->height - 2 * BORDER_WIDTH, 0xff444444);
+    wl_surface_attach(client->surface, buffer, 0, 0);
 
     wl_surface_commit(client->surface);
 }
@@ -290,7 +326,27 @@ static void pointer_enter(void *data, struct wl_pointer *pointer, uint32_t seria
 {
     struct wayland_client *client = data;
 
-    if (surface == client->decor.border_top_surface)
+    if (surface == client->decor.corner_top_left_surface)
+    {
+        client->cursor_decor_position |= CURSOR_DECOR_POSITION_TOP_LEFT_CORNER;
+        set_cursor(client, serial, "nw-resize");
+    }
+    else if (surface == client->decor.corner_top_right_surface)
+    {
+        client->cursor_decor_position |= CURSOR_DECOR_POSITION_TOP_RIGHT_CORNER;
+        set_cursor(client, serial, "ne-resize");
+    }
+    else if (surface == client->decor.corner_bottom_left_surface)
+    {
+        client->cursor_decor_position |= CURSOR_DECOR_POSITION_BOTTOM_LEFT_CORNER;
+        set_cursor(client, serial, "sw-resize");
+    }
+    else if (surface == client->decor.corner_bottom_right_surface)
+    {
+        client->cursor_decor_position |= CURSOR_DECOR_POSITION_BOTTOM_RIGHT_CORNER;
+        set_cursor(client, serial, "se-resize");
+    }
+    else if (surface == client->decor.border_top_surface)
     {
         client->cursor_decor_position |= CURSOR_DECOR_POSITION_TOP_BORDER;
         set_cursor(client, serial, "n-resize");
@@ -320,7 +376,23 @@ static void pointer_leave(void *data, struct wl_pointer *pointer, uint32_t seria
 {
     struct wayland_client *client = data;
 
-    if (surface == client->decor.border_top_surface)
+    if (surface == client->decor.corner_top_left_surface)
+    {
+        client->cursor_decor_position &= ~CURSOR_DECOR_POSITION_TOP_LEFT_CORNER;
+    }
+    else if (surface == client->decor.corner_top_right_surface)
+    {
+        client->cursor_decor_position &= ~CURSOR_DECOR_POSITION_TOP_RIGHT_CORNER;
+    }
+    else if (surface == client->decor.corner_bottom_left_surface)
+    {
+        client->cursor_decor_position &= ~CURSOR_DECOR_POSITION_BOTTOM_LEFT_CORNER;
+    }
+    else if (surface == client->decor.corner_bottom_right_surface)
+    {
+        client->cursor_decor_position &= ~CURSOR_DECOR_POSITION_BOTTOM_RIGHT_CORNER;
+    }
+    else if (surface == client->decor.border_top_surface)
     {
         client->cursor_decor_position &= ~CURSOR_DECOR_POSITION_TOP_BORDER;
     }
@@ -349,7 +421,23 @@ static void pointer_button(void *data, struct wl_pointer *pointer, uint32_t seri
 {
     struct wayland_client *client = data;
 
-    if (client->cursor_decor_position & CURSOR_DECOR_POSITION_TOP_BORDER)
+    if (client->cursor_decor_position & CURSOR_DECOR_POSITION_TOP_LEFT_CORNER)
+    {
+        xdg_toplevel_resize(client->xdg_toplevel, client->seat, serial, XDG_TOPLEVEL_RESIZE_EDGE_TOP_LEFT);
+    }
+    else if (client->cursor_decor_position & CURSOR_DECOR_POSITION_TOP_RIGHT_CORNER)
+    {
+        xdg_toplevel_resize(client->xdg_toplevel, client->seat, serial, XDG_TOPLEVEL_RESIZE_EDGE_TOP_RIGHT);
+    }
+    else if (client->cursor_decor_position & CURSOR_DECOR_POSITION_BOTTOM_LEFT_CORNER)
+    {
+        xdg_toplevel_resize(client->xdg_toplevel, client->seat, serial, XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_LEFT);
+    }
+    else if (client->cursor_decor_position & CURSOR_DECOR_POSITION_BOTTOM_RIGHT_CORNER)
+    {
+        xdg_toplevel_resize(client->xdg_toplevel, client->seat, serial, XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT);
+    }
+    else if (client->cursor_decor_position & CURSOR_DECOR_POSITION_TOP_BORDER)
     {
         xdg_toplevel_resize(client->xdg_toplevel, client->seat, serial, XDG_TOPLEVEL_RESIZE_EDGE_TOP);
     }
@@ -364,7 +452,9 @@ static void pointer_button(void *data, struct wl_pointer *pointer, uint32_t seri
     else if (client->cursor_decor_position & CURSOR_DECOR_POSITION_RIGHT_BORDER)
     {
         xdg_toplevel_resize(client->xdg_toplevel, client->seat, serial, XDG_TOPLEVEL_RESIZE_EDGE_RIGHT);
-    } else {
+    }
+    else
+    {
         xdg_toplevel_move(client->xdg_toplevel, client->seat, serial);
     }
 }
@@ -513,12 +603,20 @@ int main()
     client.decor.border_left_surface = wl_compositor_create_surface(client.compositor);
     client.decor.border_left_subsurface = wl_subcompositor_get_subsurface(client.subcompositor, client.decor.border_left_surface, client.surface);
 
-
     client.decor.border_right_surface = wl_compositor_create_surface(client.compositor);
     client.decor.border_right_subsurface = wl_subcompositor_get_subsurface(client.subcompositor, client.decor.border_right_surface, client.surface);
-    //wl_subsurface_set_position(client.decor.border_right_subsurface, client->, 0);
 
-    wl_subsurface_place_above(client.decor.border_top_subsurface, client.decor.border_left_surface);
+    client.decor.corner_top_left_surface = wl_compositor_create_surface(client.compositor);
+    client.decor.corner_top_left_subsurface = wl_subcompositor_get_subsurface(client.subcompositor, client.decor.corner_top_left_surface, client.surface);
+
+    client.decor.corner_top_right_surface = wl_compositor_create_surface(client.compositor);
+    client.decor.corner_top_right_subsurface = wl_subcompositor_get_subsurface(client.subcompositor, client.decor.corner_top_right_surface, client.surface);
+
+    client.decor.corner_bottom_left_surface = wl_compositor_create_surface(client.compositor);
+    client.decor.corner_bottom_left_subsurface = wl_subcompositor_get_subsurface(client.subcompositor, client.decor.corner_bottom_left_surface, client.surface);
+
+    client.decor.corner_bottom_right_surface = wl_compositor_create_surface(client.compositor);
+    client.decor.corner_bottom_right_subsurface = wl_subcompositor_get_subsurface(client.subcompositor, client.decor.corner_bottom_right_surface, client.surface);
 
     printf("Use the Escape key to close the window.\n");
 
